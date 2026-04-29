@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sentinel IDS | Cyber Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-color: #050a14;
+            --card-bg: rgba(16, 24, 39, 0.8);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --neon-green: #00ff88;
+            --neon-red: #ff3e3e;
+            --neon-blue: #00d4ff; /* SQL Injection color */
+            --neon-purple: #ff00ff;
+            --neon-yellow: #ffaa00;
+            --text-main: #f8fafc;
+            --text-dim: #94a3b8;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 10% 20%, rgba(0, 255, 136, 0.05) 0%, transparent 25%);
+            color: var(--text-main); font-family: 'Inter', sans-serif;
+            margin: 0; padding: 20px; overflow-x: hidden;
+        }
+
+        .dashboard-container {
+            max-width: 1600px; margin: auto;
+            display: grid; grid-template-columns: 1fr 1fr 350px; gap: 20px;
+        }
+
+        .card { background: var(--card-bg); backdrop-filter: blur(12px); border: 1px solid var(--border-color); border-radius: 16px; padding: 20px; }
+        .header-card { grid-column: span 3; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--neon-green); }
+
+        .status-pill { padding: 4px 10px; border-radius: 4px; font-size: 0.65rem; font-weight: bold; text-transform: uppercase; border: 1px solid transparent; }
+        .status-pill.normal { color: var(--neon-green); border-color: var(--neon-green); background: rgba(0, 255, 136, 0.1); }
+        .status-pill.ddos   { color: var(--neon-purple); border-color: var(--neon-purple); background: rgba(255, 0, 255, 0.1); }
+        .status-pill.sql    { color: var(--neon-blue); border-color: var(--neon-blue); background: rgba(0, 212, 255, 0.1); }
+        .status-pill.mitm   { color: var(--neon-yellow); border-color: var(--neon-yellow); background: rgba(255, 170, 0, 0.1); }
+        .status-pill.brute  { color: var(--neon-red); border-color: var(--neon-red); background: rgba(255, 62, 62, 0.1); }
+        .status-pill.suspicious { 
+            color: var(--neon-amber); 
+            border-color: var(--neon-amber); 
+            background: rgba(255, 170, 0, 0.1); 
+            box-shadow: 0 0 10px rgba(255, 170, 0, 0.3);
+        }
+        
+        .btn-block { background: rgba(255, 62, 62, 0.1); border: 1px solid var(--neon-red); color: var(--neon-red); padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 0.7rem; font-weight: bold; }
+        .btn-block:hover { background: var(--neon-red); color: white; box-shadow: 0 0 15px var(--neon-red); }
+
+        #map { height: 350px; border-radius: 12px; }
+        .table-container { grid-column: span 2; max-height: 400px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; }
+        th { position: sticky; top: 0; background: #111827; padding: 15px; font-size: 0.7rem; color: var(--text-dim); }
+        td { padding: 12px 15px; font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+
+        #alert-toast { position: fixed; bottom: 20px; right: 20px; background: rgba(255, 62, 62, 0.9); color: white; padding: 15px 25px; border-radius: 8px; border-left: 5px solid white; display: none; z-index: 1000; animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+    </style>
+</head>
+<body>
+
+<div id="alert-toast">
+    <strong id="toast-title">WARNING:</strong> <span id="toast-msg">Threat Detected!</span>
+</div>
+
+<div class="dashboard-container">
+    <div class="card header-card">
+        <h1>SENTINEL IDS</h1>
+        <div style="color: var(--neon-green); font-weight: bold;">● FIREWALL ACTIVE</div>
+    </div>
+
+    <div class="card">
+        <h3>Threat Localization</h3>
+        <div id="map"></div>
+    </div>
+
+    <div class="card">
+        <h3>Traffic Frequency</h3>
+        <div style="height: 300px;"><canvas id="attackChart"></canvas></div>
+    </div>
+
+    <div class="sidebar">
+        <div class="card">
+            <h3>Fraud Probability</h3>
+            <div style="position:relative; text-align:center;">
+                <canvas id="fraudGauge"></canvas>
+                <div id="fraudValue" style="position:absolute; top:60%; left:50%; transform:translate(-50%,-50%); font-size:1.5rem; font-weight:bold; color:var(--neon-red);">0%</div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Active Threats</h3>
+            <div id="topAttackers"></div>
+        </div>
+    </div>
+
+    <div class="card table-container">
+        <h3>Network Logs</h3>
+        <table>
+            <thead>
+                <tr><th>Time</th><th>Source IP</th><th>Destination</th><th>Threat Type</th></tr>
+            </thead>
+            <tbody id="packetTable"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    var map = L.map('map', { zoomControl: false }).setView([20, 0], 2);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map);
+    let markers = [];
+    let lastAlertTime = "";
+
+    function blockIP(ip) { alert(`Firewall: Blacklisted ${ip}`); }
+
+    function triggerAlert(type, ip) {
+        const toast = document.getElementById('alert-toast');
+        document.getElementById('toast-title').innerText = `CRITICAL: ${type}`;
+        document.getElementById('toast-msg').innerText = `Threat from ${ip}`;
+        toast.style.display = 'block';
+        setTimeout(() => toast.style.display = 'none', 5000);
+    }
+
+    var chart = new Chart(document.getElementById('attackChart').getContext('2d'), {
+        type: 'line',
+        data: { labels: [], datasets: [{ label: 'Attack', borderColor: '#ff3e3e', data: [] }, { label: 'Normal', borderColor: '#00ff88', data: [] }] },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
+
+    var fraudGauge = new Chart(document.getElementById('fraudGauge').getContext('2d'), {
+        type: 'doughnut',
+        data: { datasets: [{ data: [0, 100], backgroundColor: ['#ff3e3e', '#1e293b'], borderWidth: 0, circumference: 180, rotation: 270 }]},
+        options: { cutout: '80%', plugins: { tooltip: { enabled: false } } }
+    });
+
+    setInterval(() => {
+        fetch('/packets').then(r => r.json()).then(data => {
+            let rows = ''; let attackerCounts = {};
+            markers.forEach(m => map.removeLayer(m)); markers = [];
+            
+            data.forEach(p => {
+                let statusClass = p.status.toLowerCase().split(' ')[0];
+                rows += `<tr><td>${p.time}</td><td>${p.src}</td><td>${p.dst}</td>
+                         <td><span class="status-pill ${statusClass}">${p.status}</span></td></tr>`;
+                
+                if (statusClass !== 'normal') {
+                    attackerCounts[p.src] = (attackerCounts[p.src] || 0) + 1;
+                    markers.push(L.circleMarker([p.lat, p.lon], { color: '#ff3e3e', radius: 5 }).addTo(map));
+                }
+            });
+
+            if (data.length > 0) {
+                const latest = data[data.length - 1];
+                if (latest.status !== 'NORMAL' && latest.time !== lastAlertTime) {
+                    triggerAlert(latest.status, latest.src);
+                    lastAlertTime = latest.time;
+                }
+            }
+
+            document.getElementById('packetTable').innerHTML = rows;
+            let topIpsHtml = Object.entries(attackerCounts).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([ip, count]) => `
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                    <span style="font-size:0.8rem;">${ip} (${count})</span>
+                    <button class="btn-block" onclick="blockIP('${ip}')">BLOCK</button>
+                </div>
+            `).join('');
+            document.getElementById('topAttackers').innerHTML = topIpsHtml || 'Monitoring...';
+            
+            let fraudPct = Math.min(100, (Object.keys(attackerCounts).length * 15));
+            fraudGauge.data.datasets[0].data = [fraudPct, 100 - fraudPct];
+            fraudGauge.update();
+            document.getElementById('fraudValue').innerText = fraudPct + '%';
+        });
+
+        fetch('/stats').then(r => r.json()).then(stats => {
+            chart.data.labels = stats.times;
+            chart.data.datasets[0].data = stats.attacks;
+            chart.data.datasets[1].data = stats.normal;
+            chart.update('none');
+        });
+    }, 2000);
+</script>
+</body>
+</html>
